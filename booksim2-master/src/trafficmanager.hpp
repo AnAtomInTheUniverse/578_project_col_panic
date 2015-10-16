@@ -28,6 +28,7 @@
 #ifndef _TRAFFICMANAGER_HPP_
 #define _TRAFFICMANAGER_HPP_
 
+
 #include <list>
 #include <map>
 #include <set>
@@ -196,6 +197,9 @@ protected:
   vector<double> _overall_crossbar_conflict_stalls;
 #endif
 
+#ifdef TRACK_DOS
+ vector<vector<int> > _retired_flits_per_node;
+#endif
   vector<int> _slowest_packet;
   vector<int> _slowest_flit;
 

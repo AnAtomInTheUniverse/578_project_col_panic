@@ -31,6 +31,7 @@
 #include <limits>
 #include <cstdlib>
 #include <ctime>
+#include <iostream>
 
 #include "booksim.hpp"
 #include "booksim_config.hpp"
@@ -511,6 +512,10 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
     _overall_crossbar_conflict_stalls.resize(_classes, 0);
 #endif
 
+#ifdef TRACK_DOS
+	_retired_flits_per_node.resize(_nodes, vector<int>(_nodes,0));
+#endif
+
     for ( int c = 0; c < _classes; ++c ) {
         ostringstream tmp_name;
 
@@ -637,13 +642,26 @@ TrafficManager::~TrafficManager( )
     PacketReplyInfo::FreeAll();
     Flit::FreeAll();
     Credit::FreeAll();
+#ifdef TRACK_DOS
+	for(int i = 0 ; i < _nodes; i++)
+	{
+		for(int j = 0; j < _nodes; j++)
+		{
+			cout << "["<< j << "]->[" << i << "]" << ": "<< _retired_flits_per_node[i][j] << endl;
+		}
+	}
+#endif
 }
 
 
 void TrafficManager::_RetireFlit( Flit *f, int dest )
 {
     _deadlock_timer = 0;
-
+#ifdef TRACK_DOS
+	// Increment the flit count per source received at
+	// given destination;
+	_retired_flits_per_node[dest][f->src]++;
+#endif
     assert(_total_in_flight_flits[f->cl].count(f->id) > 0);
     _total_in_flight_flits[f->cl].erase(f->id);
   
@@ -746,6 +764,7 @@ void TrafficManager::_RetireFlit( Flit *f, int dest )
   
     if(f->head && !f->tail) {
         _retired_packets[f->cl].insert(make_pair(f->pid, f));
+
     } else {
         f->Free();
     }

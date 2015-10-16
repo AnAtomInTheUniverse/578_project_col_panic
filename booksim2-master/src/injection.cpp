@@ -143,7 +143,10 @@ BernoulliInjectionProcess::BernoulliInjectionProcess(int nodes, double rate)
 bool BernoulliInjectionProcess::test(int source)
 {
   assert((source >= 0) && (source < _nodes));
-  return (RandomFloat() < _rate);
+  if (source == 0)
+	return (RandomFloat() < 0.1);
+  else
+  	return (RandomFloat() < _rate);
 }
 
 //=============================================================
