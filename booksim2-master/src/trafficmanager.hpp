@@ -199,6 +199,9 @@ protected:
 
 #ifdef TRACK_DOS
  vector<vector<int> > _retired_flits_per_node;
+ vector<int> _injected_flits_per_node;
+ vector<bool> _dos_detected;
+ int _cycle_count;
 #endif
   vector<int> _slowest_packet;
   vector<int> _slowest_flit;

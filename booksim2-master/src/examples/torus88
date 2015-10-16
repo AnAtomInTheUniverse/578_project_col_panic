@@ -28,8 +28,8 @@
 
 
 // Topology
-topology = torus;
-k = 8;
+topology = mesh;
+k = 3;
 n = 2;
 // Routing
 routing_function = dim_order;
@@ -37,4 +37,4 @@ routing_function = dim_order;
 num_vcs = 2;
 // Traffic
 traffic = uniform;
-injection_rate = 0.15;
+injection_rate = 1.5;

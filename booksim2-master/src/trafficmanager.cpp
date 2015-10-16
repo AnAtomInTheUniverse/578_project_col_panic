@@ -514,6 +514,9 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
 
 #ifdef TRACK_DOS
 	_retired_flits_per_node.resize(_nodes, vector<int>(_nodes,0));
+    _injected_flits_per_node.resize(_nodes,0);
+    _dos_detected.resize(_nodes,false);
+    _cycle_count = 0;
 #endif
 
     for ( int c = 0; c < _classes; ++c ) {
@@ -650,6 +653,10 @@ TrafficManager::~TrafficManager( )
 			cout << "["<< j << "]->[" << i << "]" << ": "<< _retired_flits_per_node[i][j] << endl;
 		}
 	}
+    for (int i = 0; i < _nodes; i++)
+    {
+        cout << "No. of flits generated at Node[" << i << "]: " << _injected_flits_per_node[i] << endl;
+    }
 #endif
 }
 
@@ -949,11 +956,17 @@ void TrafficManager::_Inject(){
                 while( !generated && ( _qtime[input][c] <= _time ) ) {
                     int stype = _IssuePacket( input, c );
 	  
-                    if ( stype != 0 ) { //generate a packet
-                        _GeneratePacket( input, stype, c, 
-                                         _include_queuing==1 ? 
-                                         _qtime[input][c] : _time );
-                        generated = true;
+                    if ( (stype != 0) && !_dos_detected[input] ) { //generate a packet
+                        #ifdef TRACK_DOS
+                            _injected_flits_per_node[input]++;
+                        #endif
+                       // if (!_dos_detected[input])
+                        {
+                            _GeneratePacket( input, stype, c, 
+                                             _include_queuing==1 ? 
+                                             _qtime[input][c] : _time );
+                            generated = true;
+                        }
                     }
                     // only advance time if this is not a reply packet
                     if(!_use_read_write[c] || (stype >= 0)){
@@ -972,6 +985,23 @@ void TrafficManager::_Inject(){
 
 void TrafficManager::_Step( )
 {
+#ifdef TRACK_DOS
+    _cycle_count++;
+    if (_cycle_count == 1000)
+    {
+        for (int i = 0; i < _nodes; i++)
+        {
+            if (_injected_flits_per_node[i] >= 100)
+            {
+                _dos_detected[i] = true;
+                cout << "Node[" << i << "] is generating Dos Attack with " << _injected_flits_per_node[i] 
+                << "flits !!!!!!\n";
+            }
+            _injected_flits_per_node[i] = 0;
+        }
+        _cycle_count = 0;
+    }
+#endif
     bool flits_in_flight = false;
     for(int c = 0; c < _classes; ++c) {
         flits_in_flight |= !_total_in_flight_flits[c].empty();

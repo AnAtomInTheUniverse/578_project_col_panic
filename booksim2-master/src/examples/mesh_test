@@ -40,7 +40,6 @@ classes = 1;
 traffic = uniform;
 injection_rate = 0.0;
 
-watch_file = watch_test;
 latency_thres = 10000.0;
 print_csv_results = 1;
 print_activity = 1;
