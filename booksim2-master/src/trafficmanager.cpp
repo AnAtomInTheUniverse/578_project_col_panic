@@ -956,7 +956,7 @@ void TrafficManager::_Inject(){
                 while( !generated && ( _qtime[input][c] <= _time ) ) {
                     int stype = _IssuePacket( input, c );
 	  
-                    if ( (stype != 0) && !_dos_detected[input] ) { //generate a packet
+                    if ( (stype != 0)){// && !_dos_detected[input] ) { //generate a packet
                         #ifdef TRACK_DOS
                             _injected_flits_per_node[input]++;
                         #endif
@@ -987,11 +987,11 @@ void TrafficManager::_Step( )
 {
 #ifdef TRACK_DOS
     _cycle_count++;
-    if (_cycle_count == 1000)
+    if (_cycle_count == 100)
     {
         for (int i = 0; i < _nodes; i++)
         {
-            if (_injected_flits_per_node[i] >= 100)
+            if (_injected_flits_per_node[i] >= 70)
             {
                 _dos_detected[i] = true;
                 cout << "Node[" << i << "] is generating Dos Attack with " << _injected_flits_per_node[i] 

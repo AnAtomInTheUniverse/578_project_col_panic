@@ -143,9 +143,11 @@ BernoulliInjectionProcess::BernoulliInjectionProcess(int nodes, double rate)
 bool BernoulliInjectionProcess::test(int source)
 {
   assert((source >= 0) && (source < _nodes));
+#ifdef TRACK_DOS
   if (source == 0)
-	return (RandomFloat() < 0.1);
+	return (RandomFloat() < 0.8);
   else
+#endif
   	return (RandomFloat() < _rate);
 }
 
