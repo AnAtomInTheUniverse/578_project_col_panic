@@ -38,8 +38,8 @@ num_vcs = 2;
 // Traffic
 classes = 1;
 traffic = uniform;
-injection_rate = 0.05;
-//packet_size = 10;
+injection_rate = 0.02;
+packet_size = 1;
 
 latency_thres = 50000.0;
 print_csv_results = 1;

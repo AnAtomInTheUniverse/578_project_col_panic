@@ -28,7 +28,6 @@
 #ifndef _TRAFFICMANAGER_HPP_
 #define _TRAFFICMANAGER_HPP_
 
-
 #include <list>
 #include <map>
 #include <set>
@@ -45,7 +44,14 @@
 #include "outputset.hpp"
 #include "injection.hpp"
 
+
+namespace constants 
+{
+    const int _ALERT_EPOCH = 2001;
+}
 //register the requests to a node
+
+
 class PacketReplyInfo;
 
 class TrafficManager : public Module {
@@ -54,8 +60,7 @@ private:
 
   vector<vector<int> > _packet_size;
   vector<vector<int> > _packet_size_rate;
-  vector<int> _packet_size_max_val;
-
+  vector<int> _packet_size_max_val; 
 protected:
   int _nodes;
   int _routers;
@@ -100,6 +105,7 @@ protected:
   vector<vector<vector<int> > > _outstanding_credits;
   vector<vector<vector<queue<int> > > > _outstanding_classes;
 #endif
+  int _flits_per_packet;
   vector<vector<vector<int> > > _last_vc;
 
   // ============ Routing ============ 
@@ -201,7 +207,11 @@ protected:
  vector<vector<int> > _retired_flits_per_node;
  vector<int> _injected_flits_per_node;
  vector<bool> _dos_detected;
+ vector<bool> _node_alert_sent;
+ vector<int> _node_alert_timer;
  int _cycle_count;
+
+
 #endif
   vector<int> _slowest_packet;
   vector<int> _slowest_flit;

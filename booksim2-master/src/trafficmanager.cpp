@@ -516,6 +516,8 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
 	_retired_flits_per_node.resize(_nodes, vector<int>(_nodes,0));
     _injected_flits_per_node.resize(_nodes,0);
     _dos_detected.resize(_nodes,false);
+    _node_alert_sent.resize(_nodes, false);
+    _node_alert_timer.resize(_nodes, constants :: _ALERT_EPOCH);
     _cycle_count = 0;
 #endif
 
@@ -814,8 +816,10 @@ void TrafficManager::_GeneratePacket( int source, int stype,
     assert(stype!=0);
 
     Flit::FlitType packet_type = Flit::ANY_TYPE;
-    int size = _GetNextPacketSize(cl); //input size 
-    int pid = _cur_pid++;
+    _flits_per_packet = _GetNextPacketSize(cl)/*3 + rand()%4*/;//_GetNextPacketSize(cl); //input size 
+	int size = _flits_per_packet;	
+    
+	int pid = _cur_pid++;
     assert(_cur_pid);
     int packet_destination = _traffic_pattern[cl]->dest(source);
     bool record = false;
@@ -956,19 +960,32 @@ void TrafficManager::_Inject(){
                 while( !generated && ( _qtime[input][c] <= _time ) ) {
                     int stype = _IssuePacket( input, c );
 	  
-                    if ( (stype != 0)){// && !_dos_detected[input] ) { //generate a packet
+                    if ( (stype != 0)){ //&& !_dos_detected[input] ) { //generate a packet
                         #ifdef TRACK_DOS
-                            _injected_flits_per_node[input]++;
-                        #endif
-                       // if (!_dos_detected[input])
+                            
+                        if (_dos_detected[input]) 
                         {
+                            goto skip;
+                        }
+                        else if(_node_alert_sent[input] && (_node_alert_timer[input]>0 && _node_alert_timer[input] < constants :: _ALERT_EPOCH)) 
+                        {
+                            goto skip;
+
+                        }
+                        
+                        #endif
+                       //if (!(_node_alert_sent[input] && _node_alert_timer[input] != 0) || _dos_detected[i] )
+  
+                
                             _GeneratePacket( input, stype, c, 
                                              _include_queuing==1 ? 
                                              _qtime[input][c] : _time );
                             generated = true;
-                        }
+						_injected_flits_per_node[input] += _flits_per_packet;
+                        
                     }
                     // only advance time if this is not a reply packet
+                    skip: 
                     if(!_use_read_write[c] || (stype >= 0)){
                         ++_qtime[input][c];
                     }
@@ -985,22 +1002,49 @@ void TrafficManager::_Inject(){
 
 void TrafficManager::_Step( )
 {
-#ifdef TRACK_DOS
+#ifdef TRACK_DOS 
     _cycle_count++;
-    if (_cycle_count == 100)
+    for (int i = 0; i < _nodes; i++)
     {
+        if(_node_alert_sent[i] && _node_alert_timer[i] != 0)
+        {
+            _node_alert_timer[i]--;
+			cout << "count["<<i<<"] = "<<_node_alert_timer[i] << "\n";
+        }
+	}
+   	
+    
+	if (_cycle_count == 1000)
+    {
+		cout << "Node 0: #Flits in an epoch is " << _injected_flits_per_node[0] << endl;
         for (int i = 0; i < _nodes; i++)
         {
-            if (_injected_flits_per_node[i] >= 70)
+            if (_injected_flits_per_node[i] >= 600)
             {
-                _dos_detected[i] = true;
+                _node_alert_sent[i] = true;
+                _dos_detected[i]    = (_node_alert_sent[i] && _node_alert_timer[i] == 0); 
+
+				if(_dos_detected[i]) cout << "Node [" << i << "] blocked permanently" << "\n";
                 cout << "Node[" << i << "] is generating Dos Attack with " << _injected_flits_per_node[i] 
                 << "flits !!!!!!\n";
+
             }
+			else
+			{
+           	 //	_node_alert_sent[i] = false;
+				if (_node_alert_sent[i] && _node_alert_timer[i] == 0)
+				{
+					_node_alert_timer[i] = constants::_ALERT_EPOCH;
+					_node_alert_sent[i] = false;
+				}
+			}
+
             _injected_flits_per_node[i] = 0;
         }
         _cycle_count = 0;
     }
+
+
 #endif
     bool flits_in_flight = false;
     for(int c = 0; c < _classes; ++c) {
@@ -2304,7 +2348,7 @@ int TrafficManager::_GetNextPacketSize(int cl) const
     int sizes = psize.size();
 
     if(sizes == 1) {
-        return psize[0];
+        return (3 + rand()%4);//psize[0];
     }
 
     vector<int> const & prate = _packet_size_rate[cl];
