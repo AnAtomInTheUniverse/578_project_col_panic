@@ -62,6 +62,7 @@ void Flit::Reset()
 {  
   type      = ANY_TYPE ;
   vc        = -1 ;
+  priv		= false;
   cl        = -1 ;
   head      = false ;
   tail      = false ;

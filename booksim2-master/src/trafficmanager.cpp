@@ -819,7 +819,12 @@ void TrafficManager::_GeneratePacket( int source, int stype,
     _flits_per_packet = _GetNextPacketSize(cl)/*3 + rand()%4*/;//_GetNextPacketSize(cl); //input size 
 	int size = _flits_per_packet;	
     
-	int pid = _cur_pid++;
+	int pid 	= _cur_pid++;
+#ifdef PRIV_MODE
+	// Less than 5% of generated packets will be
+	// privileged.
+	bool priv 	= (RandomFloat() < 0.05);
+#endif
     assert(_cur_pid);
     int packet_destination = _traffic_pattern[cl]->dest(source);
     bool record = false;
@@ -887,6 +892,7 @@ void TrafficManager::_GeneratePacket( int source, int stype,
         f->id     = _cur_id++;
         assert(_cur_id);
         f->pid    = pid;
+		f->priv   = priv;
         f->watch  = watch | (gWatchOut && (_flits_to_watch.count(f->id) > 0));
         f->subnetwork = subnetwork;
         f->src    = source;
@@ -1067,6 +1073,7 @@ void TrafficManager::_Step( )
                                << "Ejecting flit " << f->id
                                << " (packet " << f->pid << ")"
                                << " from VC " << f->vc
+							   << " with privilege " << f->priv
                                << "." << endl;
                 }
                 flits[subnet].insert(make_pair(n, f));
@@ -1156,9 +1163,13 @@ void TrafficManager::_Step( )
                     assert(os.size() == 1);
                     OutputSet::sSetElement const & se = *os.begin();
                     assert(se.output_port == -1);
+				#ifdef PRIV_MODE
+                    int vc_start = (f->priv) ? se.vc_start : se.vc_start + 1;
+				#endif
                     int vc_start = se.vc_start;
                     int vc_end = se.vc_end;
                     int vc_count = vc_end - vc_start + 1;
+					
                     if(_noq) {
                         assert(_lookahead_routing);
                         const FlitChannel * inject = _net[subnet]->GetInject(n);

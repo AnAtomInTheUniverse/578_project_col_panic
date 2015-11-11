@@ -47,6 +47,11 @@ public:
   FlitType type;
 
   int vc;
+  // The following bit indicates that
+  // the flit is of high priviledge and
+  // must be assigned to vc0 (reserved
+  // for priviledged messages)
+  bool priv; 
 
   int cl;
 
