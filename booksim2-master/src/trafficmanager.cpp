@@ -41,6 +41,9 @@
 #include "vc.hpp"
 #include "packet_reply_info.hpp"
 
+
+bool _node0_alert_set = false;
+
 TrafficManager * TrafficManager::New(Configuration const & config,
                                      vector<Network *> const & net)
 {
@@ -792,7 +795,7 @@ int TrafficManager::_IssuePacket( int source, int cl )
         } else {
       
             //produce a packet
-            if(_injection_process[cl]->test(source)) {
+            if(_injection_process[cl]->test(source, _node0_alert_set)) {
 	
                 //coin toss to determine request type.
                 result = (RandomFloat() < _write_fraction[cl]) ? 2 : 1;
@@ -801,7 +804,7 @@ int TrafficManager::_IssuePacket( int source, int cl )
             }
         }
     } else { //normal mode
-        result = _injection_process[cl]->test(source) ? 1 : 0;
+        result = _injection_process[cl]->test(source, _node0_alert_set) ? 1 : 0;
         _requestsOutstanding[source]++;
     } 
     if(result != 0) {
@@ -892,7 +895,9 @@ void TrafficManager::_GeneratePacket( int source, int stype,
         f->id     = _cur_id++;
         assert(_cur_id);
         f->pid    = pid;
+	#ifdef PRIV_MODE
 		f->priv   = priv;
+	#endif
         f->watch  = watch | (gWatchOut && (_flits_to_watch.count(f->id) > 0));
         f->subnetwork = subnetwork;
         f->src    = source;
@@ -1022,12 +1027,16 @@ void TrafficManager::_Step( )
     
 	if (_cycle_count == 1000)
     {
-		cout << "Node 0: #Flits in an epoch is " << _injected_flits_per_node[0] << endl;
+		for(int i = 0; i < _nodes; i++)
+		{
+			cout << "##Node" << i << " "<<  _injected_flits_per_node[i] << endl;
+		}
         for (int i = 0; i < _nodes; i++)
         {
             if (_injected_flits_per_node[i] >= 600)
             {
                 _node_alert_sent[i] = true;
+				_node0_alert_set	= true;
                 _dos_detected[i]    = (_node_alert_sent[i] && _node_alert_timer[i] == 0); 
 
 				if(_dos_detected[i]) cout << "Node [" << i << "] blocked permanently" << "\n";

@@ -140,11 +140,11 @@ BernoulliInjectionProcess::BernoulliInjectionProcess(int nodes, double rate)
 
 }
 
-bool BernoulliInjectionProcess::test(int source)
+bool BernoulliInjectionProcess::test(int source, bool flag)
 {
   assert((source >= 0) && (source < _nodes));
 #ifdef TRACK_DOS
-  if ((source < 2))
+  if ((source == 0))
 	return (RandomFloat() < 0.15);
   else
 #endif
@@ -182,7 +182,7 @@ void OnOffInjectionProcess::reset()
   _state = _initial;
 }
 
-bool OnOffInjectionProcess::test(int source)
+bool OnOffInjectionProcess::test(int source, bool flag)
 {
   assert((source >= 0) && (source < _nodes));
 
