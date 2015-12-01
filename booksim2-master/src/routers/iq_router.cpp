@@ -229,7 +229,7 @@ void IQRouter::_InternalStep( )
     return;
   }
 
-  _InputQueuing( );
+  _InputQueuing();
   bool activity = !_proc_credits.empty();
 
   if(!_route_vcs.empty())
@@ -336,7 +336,7 @@ bool IQRouter::_ReceiveCredits( )
 // input queuing
 //------------------------------------------------------------------------------
 
-void IQRouter::_InputQueuing( )
+void IQRouter::_InputQueuing()
 {
   for(map<int, Flit *>::const_iterator iter = _in_queue_flits.begin();
       iter != _in_queue_flits.end();
@@ -350,6 +350,37 @@ void IQRouter::_InputQueuing( )
 
     int const vc = f->vc;
     assert((vc >= 0) && (vc < _vcs));
+//	cout << "##ROUTER_Flit: " << f->id << " has vc : " << f->vc << " and priv: " << f->priv << endl;
+#ifdef PRIV_MODE
+	// Router receives flits here. If vc of incoming flit is 0, then 
+	// the flit must have priv == 1. If it is the head flit of a priv
+	// packet, then we update the _priv_count (to keep track of how
+	// many priv packets this router must propagate). Additionally, if 
+	// it is the head of a priv packet, then we set _block_vcs = true
+	// as the Switch Allocator must only allocate to VC0 in priv mode.
+	// All other VCs must wait until priv packets have drained to continue.
+	if(vc == 0)
+  	{
+//		cout << "##Flit: " << f->id << " has vc : " << f->vc << " and priv: " << f->priv << endl;
+		assert(f->priv);
+		if(f->head)
+		{
+			_block_vcs = true;
+			blocked_vcs[_id] = true;
+			_priv_count++;
+
+		}
+		else if(f->tail)
+		{
+			_priv_count--;
+		}
+		if(_priv_count == 0)
+		{
+			_block_vcs = false;
+			blocked_vcs[_id] = false;
+		}
+	}
+#endif
 
     Buffer * const cur_buf = _buf[input];
 
@@ -613,17 +644,33 @@ void IQRouter::_VCAllocEvaluate( )
       int vc_start;
       int vc_end;
       
-      if(_noq && _noq_next_output_port[input][vc] >= 0) {
-	assert(!_routing_delay);
-	vc_start = _noq_next_vc_start[input][vc];
-	vc_end = _noq_next_vc_end[input][vc];
-      } else {
-	vc_start = iset->vc_start;
-	vc_end = iset->vc_end;
+      if(_noq && _noq_next_output_port[input][vc] >= 0) 
+	  {
+			assert(!_routing_delay);
+			vc_start = _noq_next_vc_start[input][vc];
+			vc_end = _noq_next_vc_end[input][vc];
+      }
+	  else 
+	  {
+			vc_start = iset->vc_start;
+			vc_end = iset->vc_end;
+#ifdef PRIV_MODE
+			// If flit is priviledged then it can only be assigned to VC 0 on
+			// both the ingress and egress ports of the router
+			vc_start	= (f->priv) ? 0 : (iset->vc_start == 0 ) ? iset->vc_start + 1: iset->vc_start;
+			vc_end 		= (f->priv) ? vc_start : iset->vc_end;
+#endif
       }
       assert(vc_start >= 0 && vc_start < _vcs);
       assert(vc_end >= 0 && vc_end < _vcs);
       assert(vc_end >= vc_start);
+#ifdef PRIV_MODE
+	  if(f->priv)
+	  {
+			  assert(vc_start == 0);
+			  assert(vc_end == vc_start);
+	  }
+#endif
 
       for(int out_vc = vc_start; out_vc <= vc_end; ++out_vc) {
 	assert((out_vc >= 0) && (out_vc < _vcs));
@@ -734,6 +781,12 @@ void IQRouter::_VCAllocEvaluate( )
     assert(f);
     assert(f->vc == vc);
     assert(f->head);
+#ifdef PRIV_MODE
+	if(f->priv)
+	{
+		assert(f->vc == 0);
+	}
+#endif
 
     int const input_and_vc
       = _vc_shuffle_requests ? (vc*_inputs + input) : (input*_vcs + vc);
@@ -745,6 +798,12 @@ void IQRouter::_VCAllocEvaluate( )
       assert((match_output >= 0) && (match_output < _outputs));
       int const match_vc = output_and_vc % _vcs;
       assert((match_vc >= 0) && (match_vc < _vcs));
+#ifdef PRIV_MODE
+	if(f->priv)
+	{
+		assert(match_vc == 0);
+	}
+#endif
 
       if(f->watch) {
 	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
@@ -811,6 +870,13 @@ void IQRouter::_VCAllocEvaluate( )
       assert(f);
       assert(f->vc == vc);
       assert(f->head);
+#ifdef PRIV_MODE
+	if(f->priv)
+	{
+		assert(match_vc == 0);
+		assert(f->vc == 0);
+	}
+#endif
       
       if(!dest_buf->IsAvailableFor(match_vc)) {
 	if(f->watch) {
@@ -866,6 +932,12 @@ void IQRouter::_VCAllocUpdate( )
     assert(f);
     assert(f->vc == vc);
     assert(f->head);
+#ifdef PRIV_MODE
+	if(f->priv)
+	{
+		assert(f->vc == 0);
+	}
+#endif
     
     if(f->watch) {
       *gWatchOut << GetSimTime() << " | " << FullName() << " | "
@@ -881,7 +953,8 @@ void IQRouter::_VCAllocUpdate( )
       
       int const match_output = output_and_vc / _vcs;
       assert((match_output >= 0) && (match_output < _outputs));
-      int const match_vc = output_and_vc % _vcs;
+      int match_vc_temp = output_and_vc % _vcs;
+      int const match_vc = ((match_vc_temp == 0) && (!f->priv)) ? match_vc_temp + 1: match_vc_temp; //output_and_vc % _vcs;
       assert((match_vc >= 0) && (match_vc < _vcs));
       
       if(f->watch) {
@@ -945,6 +1018,17 @@ void IQRouter::_SWHoldEvaluate( )
     int const input = iter->second.first.first;
     assert((input >= 0) && (input < _inputs));
     int const vc = iter->second.first.second;
+//#ifdef PRIV_MODE
+//	// If the router is in the process of propagating a priv packet,
+//	// then it must only allocate switch to VC0. We check this by
+//	// looking at the _block_vcs flag. If it is true, then the router
+//	// must block all VCs except for VC0. So we just move to the next
+//	// iteration and pick the next VC from _sw_hold_vcs. 
+//	if(_block_vcs && (vc != 0))
+//	{
+//		continue;
+//	}
+//#endif
     assert((vc >= 0) && (vc < _vcs));
     
     assert(iter->second.second == -1);
@@ -954,6 +1038,13 @@ void IQRouter::_SWHoldEvaluate( )
     assert(cur_buf->GetState(vc) == VC::active);
     
     Flit const * const f = cur_buf->FrontFlit(vc);
+//#ifdef PRIV_MODE
+//	// If VC = 0, then the flit must be a privileged flit
+//	if(vc == 0)
+//	{
+//		assert(f->priv);
+//	}
+//#endif
     assert(f);
     assert(f->vc == vc);
 
@@ -1020,6 +1111,17 @@ void IQRouter::_SWHoldUpdate( )
     assert((input >= 0) && (input < _inputs));
     int const vc = item.second.first.second;
     assert((vc >= 0) && (vc < _vcs));
+//#ifdef PRIV_MODE
+//	// If the router is in the process of propagating a priv packet,
+//	// then it must only allocate switch to VC0. We check this by
+//	// looking at the _block_vcs flag. If it is true, then the router
+//	// must block all VCs except for VC0. So we just move to the next
+//	// iteration and pick the next VC from _sw_hold_vcs. 
+//	if(_block_vcs && (vc != 0))
+//	{
+//		continue;
+//	}
+//#endif
     
     assert(item.second.second != -1);
 
@@ -1030,6 +1132,13 @@ void IQRouter::_SWHoldUpdate( )
     Flit * const f = cur_buf->FrontFlit(vc);
     assert(f);
     assert(f->vc == vc);
+//#ifdef PRIV_MODE
+//	// If VC0 is picked, then flit must have priv == TRUE
+//	if(vc == 0)
+//	{
+//		assert(f->priv);
+//	}
+//#endif
 
     if(f->watch) {
       *gWatchOut << GetSimTime() << " | " << FullName() << " | "
@@ -1341,6 +1450,17 @@ void IQRouter::_SWAllocEvaluate( )
     assert((input >= 0) && (input < _inputs));
     int const vc = iter->second.first.second;
     assert((vc >= 0) && (vc < _vcs));
+//#ifdef PRIV_MODE
+//	// If the router is in the process of propagating a priv packet,
+//	// then it must only allocate switch to VC0. We check this by
+//	// looking at the _block_vcs flag. If it is true, then the router
+//	// must block all VCs except for VC0. So we just move to the next
+//	// iteration and pick the next VC from _sw_hold_vcs. 
+//	if(_block_vcs && (vc != 0))
+//	{
+//		continue;
+//	}
+//#endif
     
     assert(iter->second.second == -1);
 
@@ -1354,6 +1474,13 @@ void IQRouter::_SWAllocEvaluate( )
     Flit const * const f = cur_buf->FrontFlit(vc);
     assert(f);
     assert(f->vc == vc);
+//#ifdef PRIV_MODE
+//	// If VC0 is selected, then f->priv must be true
+//	if(vc == 0)
+//	{
+//		assert(f->priv);
+//	}
+//#endif
 
     if(f->watch) {
       *gWatchOut << GetSimTime() << " | " << FullName() << " | " 
@@ -1506,6 +1633,17 @@ void IQRouter::_SWAllocEvaluate( )
     assert((input >= 0) && (input < _inputs));
     int const vc = iter->second.first.second;
     assert((vc >= 0) && (vc < _vcs));
+//#ifdef PRIV_MODE
+//	// If the router is in the process of propagating a priv packet,
+//	// then it must only allocate switch to VC0. We check this by
+//	// looking at the _block_vcs flag. If it is true, then the router
+//	// must block all VCs except for VC0. So we just move to the next
+//	// iteration and pick the next VC from _sw_hold_vcs. 
+//	if(_block_vcs && (vc != 0))
+//	{
+//		continue;
+//	}
+//#endif
 
     if(iter->second.second < -1) {
       continue;
@@ -1521,6 +1659,13 @@ void IQRouter::_SWAllocEvaluate( )
     Flit const * const f = cur_buf->FrontFlit(vc);
     assert(f);
     assert(f->vc == vc);
+//#ifdef PRIV_MODE
+//	// If VC0 is chosen, then f->priv must be true
+//	if(vc == 0)
+//	{
+//		assert(f->priv);
+//	}
+//#endif
 
     int const expanded_input = input * _input_speedup + vc % _input_speedup;
 
@@ -1659,6 +1804,17 @@ void IQRouter::_SWAllocEvaluate( )
       assert((input % _output_speedup) == (expanded_output % _output_speedup));
       int const vc = iter->second.first.second;
       assert((vc >= 0) && (vc < _vcs));
+//#ifdef PRIV_MODE
+//	// If the router is in the process of propagating a priv packet,
+//	// then it must only allocate switch to VC0. We check this by
+//	// looking at the _block_vcs flag. If it is true, then the router
+//	// must block all VCs except for VC0. So we just move to the next
+//	// iteration and pick the next VC from _sw_hold_vcs. 
+//	if(_block_vcs && (vc != 0))
+//	{
+//		continue;
+//	}
+//#endif
       
       int const expanded_input = input * _input_speedup + vc % _input_speedup;
       assert(_switch_hold_vc[expanded_input] != vc);
@@ -1671,6 +1827,13 @@ void IQRouter::_SWAllocEvaluate( )
       Flit const * const f = cur_buf->FrontFlit(vc);
       assert(f);
       assert(f->vc == vc);
+//#ifdef PRIV_MODE
+//	  // If VC0 is chosen then f->priv must be true
+//	  if(vc == 0)
+//	  {
+//			assert(f->priv);
+//	  }
+//#endif
 
       if((_switch_hold_in[expanded_input] >= 0) ||
 	 (_switch_hold_out[expanded_output] >= 0)) {
@@ -1835,296 +1998,355 @@ void IQRouter::_SWAllocEvaluate( )
 
 void IQRouter::_SWAllocUpdate( )
 {
-  while(!_sw_alloc_vcs.empty()) {
+  while(!_sw_alloc_vcs.empty()) 
+  {
 
-    pair<int, pair<pair<int, int>, int> > const & item = _sw_alloc_vcs.front();
+    	pair<int, pair<pair<int, int>, int> > const & item = _sw_alloc_vcs.front();
 
-    int const time = item.first;
-    if((time < 0) || (GetSimTime() < time)) {
-      break;
-    }
-    assert(GetSimTime() == time);
+    	int const time = item.first;
+    	if((time < 0) || (GetSimTime() < time)) 
+		{
+    	  break;
+    	}
+    	assert(GetSimTime() == time);
 
-    int const input = item.second.first.first;
-    assert((input >= 0) && (input < _inputs));
-    int const vc = item.second.first.second;
-    assert((vc >= 0) && (vc < _vcs));
-    
-    Buffer * const cur_buf = _buf[input];
-    assert(!cur_buf->Empty(vc));
-    assert((cur_buf->GetState(vc) == VC::active) ||
-	   (_speculative && (cur_buf->GetState(vc) == VC::vc_alloc)));
-    
-    Flit * const f = cur_buf->FrontFlit(vc);
-    assert(f);
-    assert(f->vc == vc);
+    	int const input = item.second.first.first;
+    	assert((input >= 0) && (input < _inputs));
+    	int const vc = item.second.first.second;
+    	assert((vc >= 0) && (vc < _vcs));
+    	
+    	Buffer * const cur_buf = _buf[input];
+    	assert(!cur_buf->Empty(vc));
+    	assert((cur_buf->GetState(vc) == VC::active) ||
+		   (_speculative && (cur_buf->GetState(vc) == VC::vc_alloc)));
+    	
+    	Flit * const f = cur_buf->FrontFlit(vc);
+    	assert(f);
+    	assert(f->vc == vc);
 
-    if(f->watch) {
-      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-		 << "Completed switch allocation for VC " << vc
-		 << " at input " << input
-		 << " (front: " << f->id
-		 << ")." << endl;
-    }
-    
-    int const expanded_output = item.second.second;
-    
-    if(expanded_output >= 0) {
-      
-      int const expanded_input = input * _input_speedup + vc % _input_speedup;
-      assert(_switch_hold_vc[expanded_input] < 0);
-      assert(_switch_hold_in[expanded_input] < 0);
-      assert(_switch_hold_out[expanded_output] < 0);
+    	if(f->watch) 
+		{
+    		  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
+				 << "Completed switch allocation for VC " << vc
+				 << " at input " << input
+				 << " (front: " << f->id
+				 << ")." << endl;
+    	}
+    	
+		// ## DELETED CONST MACRO HERE!
+    	int expanded_output = item.second.second;
+#ifdef PRIV_MODE
+		// If the router is in the process of propagating a priv packet,
+		// then it must only allocate switch to VC0. We check this by
+		// looking at the _block_vcs flag. If it is true, then the router
+		// must block all VCs except for VC0. So we just move to the next
+		// iteration and pick the next VC from _sw_hold_vcs. 
+		//expanded_output = (_block_vcs && (vc != 0)) ? STALL_PRIV_MODE : expanded_output;
+#endif
+    	
+    	if(expanded_output >= 0) 
+		{
+    	  
+    	  	int const expanded_input = input * _input_speedup + vc % _input_speedup;
+    	  	assert(_switch_hold_vc[expanded_input] < 0);
+    	  	assert(_switch_hold_in[expanded_input] < 0);
+    	  	assert(_switch_hold_out[expanded_output] < 0);
 
-      int const output = expanded_output / _output_speedup;
-      assert((output >= 0) && (output < _outputs));
+    	  	int const output = expanded_output / _output_speedup;
+    	  	assert((output >= 0) && (output < _outputs));
 
-      BufferState * const dest_buf = _next_buf[output];
+    	  	BufferState * const dest_buf = _next_buf[output];
 
-      int match_vc;
+    	  	int match_vc;
 
-      if(!_vc_allocator && (cur_buf->GetState(vc) == VC::vc_alloc)) {
+    	  	if(!_vc_allocator && (cur_buf->GetState(vc) == VC::vc_alloc)) 
+			{
 
-	assert(f->head);
+				assert(f->head);
 
-	int const cl = f->cl;
-	assert((cl >= 0) && (cl < _classes));
+				int const cl = f->cl;
+				assert((cl >= 0) && (cl < _classes));
 
-	int const vc_offset = _vc_rr_offset[output*_classes+cl];
+				int const vc_offset = _vc_rr_offset[output*_classes+cl];
 
-	match_vc = -1;
-	int match_prio = numeric_limits<int>::min();
+				match_vc = -1;
+				int match_prio = numeric_limits<int>::min();
 
-	const OutputSet * route_set = cur_buf->GetRouteSet(vc);
-	set<OutputSet::sSetElement> const setlist = route_set->GetSet();
-	
-	assert(!_noq || (setlist.size() == 1));
-	
-	for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
-	    iset != setlist.end();
-	    ++iset) {
-	  if(iset->output_port == output) {
+				const OutputSet * route_set = cur_buf->GetRouteSet(vc);
+				set<OutputSet::sSetElement> const setlist = route_set->GetSet();
+				
+				assert(!_noq || (setlist.size() == 1));
+				
+				for(set<OutputSet::sSetElement>::const_iterator iset = setlist.begin();
+	    			iset != setlist.end();
+	    			++iset) 
+				{
+	  				if(iset->output_port == output) 
+					{
 
-	    int vc_start;
-	    int vc_end;
-	    
-	    if(_noq && _noq_next_output_port[input][vc] >= 0) {
-	      assert(!_routing_delay);
-	      vc_start = _noq_next_vc_start[input][vc];
-	      vc_end = _noq_next_vc_end[input][vc];
-	    } else {
-	      vc_start = iset->vc_start;
-	      vc_end = iset->vc_end;
-	    }
-	    assert(vc_start >= 0 && vc_start < _vcs);
-	    assert(vc_end >= 0 && vc_end < _vcs);
-	    assert(vc_end >= vc_start);
+	    				int vc_start;
+	    				int vc_end;
+	    				
+	    				if(_noq && _noq_next_output_port[input][vc] >= 0) 
+						{
+	    				  	assert(!_routing_delay);
+	    				  	vc_start = _noq_next_vc_start[input][vc];
+	    				  	vc_end = _noq_next_vc_end[input][vc];
+	    				}
+						else 
+						{
+	    				  	vc_start = iset->vc_start;
+	    				  	vc_end = iset->vc_end;
+	    				}
+	    				assert(vc_start >= 0 && vc_start < _vcs);
+	    				assert(vc_end >= 0 && vc_end < _vcs);
+	    				assert(vc_end >= vc_start);
 
-	    for(int out_vc = vc_start; out_vc <= vc_end; ++out_vc) {
-	      assert((out_vc >= 0) && (out_vc < _vcs));
-	      
-	      int vc_prio = iset->pri;
-	      if(_vc_prioritize_empty && !dest_buf->IsEmptyFor(out_vc)) {
-		assert(vc_prio >= 0);
-		vc_prio += numeric_limits<int>::min();
-	      }
+	    				for(int out_vc = vc_start; out_vc <= vc_end; ++out_vc) 
+						{
+	    				  	assert((out_vc >= 0) && (out_vc < _vcs));
+	    				  	
+	    				  	int vc_prio = iset->pri;
+	    				  	if(_vc_prioritize_empty && !dest_buf->IsEmptyFor(out_vc))
+							{
+								assert(vc_prio >= 0);
+								vc_prio += numeric_limits<int>::min();
+	    			  		}
 
-	      // FIXME: This check should probably be performed in Evaluate(), 
-	      // not Update(), as the latter can cause the outcome to depend on 
-	      // the order of evaluation!
-	      if(dest_buf->IsAvailableFor(out_vc) && 
-		 !dest_buf->IsFullFor(out_vc) &&
-		 ((match_vc < 0) || 
-		  RoundRobinArbiter::Supersedes(out_vc, vc_prio, 
-						match_vc, match_prio, 
-						vc_offset, _vcs))) {
-		match_vc = out_vc;
-		match_prio = vc_prio;
-	      }
-	    }	
-	  }
-	}
-	assert(match_vc >= 0);
+	    			  		// FIXME: This check should probably be performed in Evaluate(), 
+	    			  		// not Update(), as the latter can cause the outcome to depend on 
+	    			  		// the order of evaluation!
+	    			  		if(dest_buf->IsAvailableFor(out_vc) && !dest_buf->IsFullFor(out_vc) && ((match_vc < 0) || 
+					 		 RoundRobinArbiter::Supersedes(out_vc, vc_prio,	match_vc, match_prio, vc_offset, _vcs))) 
+							{
+								match_vc = out_vc;
+								match_prio = vc_prio;
+	      					}
+	    				}	
+	  				}
+				}
+				assert(match_vc >= 0);
 
-	if(f->watch) {
-	  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-		     << "  Allocating VC " << match_vc
-		     << " at output " << output
-		     << " via piggyback VC allocation." << endl;
-	}
+				if(f->watch) 
+				{
+					  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
+						     << "  Allocating VC " << match_vc
+						     << " at output " << output
+						     << " via piggyback VC allocation." << endl;
+				}
 
-	cur_buf->SetState(vc, VC::active);
-	cur_buf->SetOutput(vc, output, match_vc);
-	dest_buf->TakeBuffer(match_vc, input*_vcs + vc);
+				cur_buf->SetState(vc, VC::active);
+				cur_buf->SetOutput(vc, output, match_vc);
+				dest_buf->TakeBuffer(match_vc, input*_vcs + vc);
 
-	_vc_rr_offset[output*_classes+cl] = (match_vc + 1) % _vcs;
+				_vc_rr_offset[output*_classes+cl] = (match_vc + 1) % _vcs;
 
-      } else {
+      		}
+			else 
+			{
 
-	assert(cur_buf->GetOutputPort(vc) == output);
+				assert(cur_buf->GetOutputPort(vc) == output);
 
-	match_vc = cur_buf->GetOutputVC(vc);
+				match_vc = cur_buf->GetOutputVC(vc);
 
-      }
-      assert((match_vc >= 0) && (match_vc < _vcs));
+    		}
+    		assert((match_vc >= 0) && (match_vc < _vcs));
 
-      if(f->watch) {
-	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
-		   << "  Scheduling switch connection from input " << input
-		   << "." << (vc % _input_speedup)
-		   << " to output " << output
-		   << "." << (expanded_output % _output_speedup)
-		   << "." << endl;
-      }
+    		if(f->watch) 
+			{
+				*gWatchOut << GetSimTime() << " | " << FullName() << " | "
+					   << "  Scheduling switch connection from input " << input
+					   << "." << (vc % _input_speedup)
+					   << " to output " << output
+					   << "." << (expanded_output % _output_speedup)
+					   << "." << endl;
+    		 }
 
-      cur_buf->RemoveFlit(vc);
+    		 cur_buf->RemoveFlit(vc);
 
 #ifdef TRACK_FLOWS
-      --_stored_flits[f->cl][input];
-      if(f->tail) --_active_packets[f->cl][input];
+      		 --_stored_flits[f->cl][input];
+      		 if(f->tail) --_active_packets[f->cl][input];
 #endif
 
-      _bufferMonitor->read(input, f) ;
+      		_bufferMonitor->read(input, f) ;
 
-      f->hops++;
-      f->vc = match_vc;
+      		f->hops++;
+      		f->vc = match_vc;
 
-      if(!_routing_delay && f->head) {
-	const FlitChannel * channel = _output_channels[output];
-	const Router * router = channel->GetSink();
-	if(router) {
-	  if(_noq) {
-	    if(f->watch) {
-	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-			 << "Updating lookahead routing information for flit " << f->id
-			 << " (NOQ)." << endl;
-	    }
-	    int next_output_port = _noq_next_output_port[input][vc];
-	    assert(next_output_port >= 0);
-	    _noq_next_output_port[input][vc] = -1;
-	    int next_vc_start = _noq_next_vc_start[input][vc];
-	    assert(next_vc_start >= 0 && next_vc_start < _vcs);
-	    _noq_next_vc_start[input][vc] = -1;
-	    int next_vc_end = _noq_next_vc_end[input][vc];
-	    assert(next_vc_end >= 0 && next_vc_end < _vcs);
-	    _noq_next_vc_end[input][vc] = -1;
-	    f->la_route_set.Clear();
-	    f->la_route_set.AddRange(next_output_port, next_vc_start, next_vc_end);
-	  } else {
-	    if(f->watch) {
-	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-			 << "Updating lookahead routing information for flit " << f->id
-			 << "." << endl;
-	    }
-	    int in_channel = channel->GetSinkPort();
-	    _rf(router, f, in_channel, &f->la_route_set, false);
-	  }
-	} else {
-	  f->la_route_set.Clear();
-	}
-      }
+      		if(!_routing_delay && f->head) 
+			{
+				const FlitChannel * channel = _output_channels[output];
+				const Router * router = channel->GetSink();
+				if(router) 
+				{
+				  	if(_noq) 
+					{
+				  	  	if(f->watch) 
+						{
+				  	  	  	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
+				  	  			 << "Updating lookahead routing information for flit " << f->id
+				  	  		 	<< " (NOQ)." << endl;
+				  	  	}
+				  	  	int next_output_port = _noq_next_output_port[input][vc];
+				  	  	assert(next_output_port >= 0);
+				  	  	_noq_next_output_port[input][vc] = -1;
+				  	  	int next_vc_start = _noq_next_vc_start[input][vc];
+				  	  	assert(next_vc_start >= 0 && next_vc_start < _vcs);
+				  	  	_noq_next_vc_start[input][vc] = -1;
+				  	  	int next_vc_end = _noq_next_vc_end[input][vc];
+				  	  	assert(next_vc_end >= 0 && next_vc_end < _vcs);
+				  	  	_noq_next_vc_end[input][vc] = -1;
+				  	  	f->la_route_set.Clear();
+				  	  	f->la_route_set.AddRange(next_output_port, next_vc_start, next_vc_end);
+				  	} 
+					else 
+					{
+				  	  	if(f->watch) 
+						{
+				  	  	  	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
+				  	  			<< "Updating lookahead routing information for flit " << f->id
+				  	  		 	<< "." << endl;
+				  	  	}
+				  	  int in_channel = channel->GetSinkPort();
+				  	  _rf(router, f, in_channel, &f->la_route_set, false);
+				  	}
+				} 
+				else 
+				{
+	  				f->la_route_set.Clear();
+				}
+      		}
 
 #ifdef TRACK_FLOWS
-      ++_outstanding_credits[f->cl][output];
-      _outstanding_classes[output][f->vc].push(f->cl);
+      		++_outstanding_credits[f->cl][output];
+      		_outstanding_classes[output][f->vc].push(f->cl);
 #endif
+			
+      		dest_buf->SendingFlit(f);
 
-      dest_buf->SendingFlit(f);
+      		_crossbar_flits.push_back(make_pair(-1, make_pair(f, make_pair(expanded_input, expanded_output))));
 
-      _crossbar_flits.push_back(make_pair(-1, make_pair(f, make_pair(expanded_input, expanded_output))));
+      		if(_out_queue_credits.count(input) == 0) 
+			{
+					_out_queue_credits.insert(make_pair(input, Credit::New()));
+     		}
+      		_out_queue_credits.find(input)->second->vc.insert(vc);
 
-      if(_out_queue_credits.count(input) == 0) {
-	_out_queue_credits.insert(make_pair(input, Credit::New()));
-      }
-      _out_queue_credits.find(input)->second->vc.insert(vc);
-
-      if(cur_buf->Empty(vc)) {
-	if(f->tail) {
-	  cur_buf->SetState(vc, VC::idle);
-	}
-      } else {
-	Flit * const nf = cur_buf->FrontFlit(vc);
-	assert(nf);
-	assert(nf->vc == vc);
-	if(f->tail) {
-	  assert(nf->head);
-	  if(_routing_delay) {
-	    cur_buf->SetState(vc, VC::routing);
-	    _route_vcs.push_back(make_pair(-1, item.second.first));
-	  } else {
-	    if(nf->watch) {
-	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-			 << "Using precomputed lookahead routing information for VC " << vc
-			 << " at input " << input
-			 << " (front: " << nf->id
-			 << ")." << endl;
-	    }
-	    cur_buf->SetRouteSet(vc, &nf->la_route_set);
-	    cur_buf->SetState(vc, VC::vc_alloc);
-	    if(_speculative) {
-	      _sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,
-							      -1)));
-	    }
-	    if(_vc_allocator) {
-	      _vc_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,
-							      -1)));
-	    }
-	    if(_noq) {
-	      _UpdateNOQ(input, vc, nf);
-	    }
-	  }
-	} else {
-	  if(_hold_switch_for_packet) {
-	    if(f->watch) {
-	      *gWatchOut << GetSimTime() << " | " << FullName() << " | "
-			 << "Setting up switch hold for VC " << vc
-			 << " at input " << input
-			 << "." << (expanded_input % _input_speedup)
-			 << " to output " << output
-			 << "." << (expanded_output % _output_speedup)
-			 << "." << endl;
-	    }
-	    _switch_hold_vc[expanded_input] = vc;
-	    _switch_hold_in[expanded_input] = expanded_output;
-	    _switch_hold_out[expanded_output] = expanded_input;
-	    _sw_hold_vcs.push_back(make_pair(-1, make_pair(item.second.first,
-							   -1)));
-	  } else {
-	    _sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,
-							    -1)));
-	  }
-	}
-      }
-    } else {
-      if(f->watch) {
-	*gWatchOut << GetSimTime() << " | " << FullName() << " | "
-		   << "  No output port allocated." << endl;
-      }
+      		if(cur_buf->Empty(vc)) 
+			{
+				if(f->tail) 
+				{
+	  				cur_buf->SetState(vc, VC::idle);
+				}
+      		} 
+			else 
+			{
+				Flit * const nf = cur_buf->FrontFlit(vc);
+				assert(nf);
+				assert(nf->vc == vc);
+				if(f->tail) 
+				{
+				  	assert(nf->head);
+				  	if(_routing_delay) 
+					{
+				  	  	cur_buf->SetState(vc, VC::routing);
+				  	  	_route_vcs.push_back(make_pair(-1, item.second.first));
+				  	} 
+					else 
+					{
+				    	if(nf->watch) 
+						{
+				    		  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
+								 << "Using precomputed lookahead routing information for VC " << vc
+								 << " at input " << input
+								 << " (front: " << nf->id
+								 << ")." << endl;
+				    	}
+				    	cur_buf->SetRouteSet(vc, &nf->la_route_set);
+				    	cur_buf->SetState(vc, VC::vc_alloc);
+				    	if(_speculative) 
+						{
+				    	 	_sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,
+											      -1)));
+				    	}
+				    	if(_vc_allocator) 
+						{
+				    	  	_vc_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,
+											      -1)));
+				    	}
+				    	if(_noq) 
+						{
+				    	  	_UpdateNOQ(input, vc, nf);
+				    	}
+				  }
+				}
+				else 
+				{
+				  	if(_hold_switch_for_packet) 
+					{
+				  	  	if(f->watch) 
+						{
+				  	  		  *gWatchOut << GetSimTime() << " | " << FullName() << " | "
+				  	  			 << "Setting up switch hold for VC " << vc
+				  	  			 << " at input " << input
+				  	  			 << "." << (expanded_input % _input_speedup)
+				  	  			 << " to output " << output
+				  	  			 << "." << (expanded_output % _output_speedup)
+				  	  			 << "." << endl;
+				  	  	}
+				  	  	_switch_hold_vc[expanded_input] = vc;
+				  	  	_switch_hold_in[expanded_input] = expanded_output;
+				  	  	_switch_hold_out[expanded_output] = expanded_input;
+				  	  	_sw_hold_vcs.push_back(make_pair(-1, make_pair(item.second.first, -1)));
+				  	} 
+					else 
+					{
+				  	  	_sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first,-1)));
+				  	}
+				}
+    		}
+    	} 
+		else 
+		{
+      		if(f->watch) 
+			{
+				*gWatchOut << GetSimTime() << " | " << FullName() << " | " << "  No output port allocated." << endl;
+      		}
 
 #ifdef TRACK_STALLS
-      assert((expanded_output == -1) || // for stalls that are accounted for in VC allocation path
-	     (expanded_output == STALL_BUFFER_BUSY) ||
-	     (expanded_output == STALL_BUFFER_CONFLICT) ||
-	     (expanded_output == STALL_BUFFER_FULL) ||
-	     (expanded_output == STALL_BUFFER_RESERVED) ||
-	     (expanded_output == STALL_CROSSBAR_CONFLICT));
-      if(expanded_output == STALL_BUFFER_BUSY) {
-	++_buffer_busy_stalls[f->cl];
-      } else if(expanded_output == STALL_BUFFER_CONFLICT) {
-	++_buffer_conflict_stalls[f->cl];
-      } else if(expanded_output == STALL_BUFFER_FULL) {
-	++_buffer_full_stalls[f->cl];
-      } else if(expanded_output == STALL_BUFFER_RESERVED) {
-	++_buffer_reserved_stalls[f->cl];
-      } else if(expanded_output == STALL_CROSSBAR_CONFLICT) {
-	++_crossbar_conflict_stalls[f->cl];
-      }
+      		assert((expanded_output == -1) || // for stalls that are accounted for in VC allocation path
+	  		   (expanded_output == STALL_BUFFER_BUSY) ||
+	  		   (expanded_output == STALL_BUFFER_CONFLICT) ||
+	  		   (expanded_output == STALL_BUFFER_FULL) ||
+	  		   (expanded_output == STALL_BUFFER_RESERVED) ||
+	  		   (expanded_output == STALL_CROSSBAR_CONFLICT));
+      		if(expanded_output == STALL_BUFFER_BUSY) 
+			{
+				++_buffer_busy_stalls[f->cl];
+      		} 
+			else if(expanded_output == STALL_BUFFER_CONFLICT) 
+			{
+				++_buffer_conflict_stalls[f->cl];
+      		} 
+			else if(expanded_output == STALL_BUFFER_FULL) 
+			{
+				++_buffer_full_stalls[f->cl];
+      		}
+			else if(expanded_output == STALL_BUFFER_RESERVED) 
+			{
+				++_buffer_reserved_stalls[f->cl];
+      		} 
+			else if(expanded_output == STALL_CROSSBAR_CONFLICT) 
+			{
+				++_crossbar_conflict_stalls[f->cl];
+      		}
 #endif
 
-      _sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first, -1)));
-    }
-    _sw_alloc_vcs.pop_front();
-  }
+      		_sw_alloc_vcs.push_back(make_pair(-1, make_pair(item.second.first, -1)));
+    	}
+    	_sw_alloc_vcs.pop_front();
+  	}
 }
 
 

@@ -524,6 +524,10 @@ TrafficManager::TrafficManager( const Configuration &config, const vector<Networ
     _cycle_count = 0;
 #endif
 
+//#ifdef PRIV_MODE
+//	_block_vcs.resize(_nodes,false);
+//#endif
+
     for ( int c = 0; c < _classes; ++c ) {
         ostringstream tmp_name;
 
@@ -826,7 +830,7 @@ void TrafficManager::_GeneratePacket( int source, int stype,
 #ifdef PRIV_MODE
 	// Less than 5% of generated packets will be
 	// privileged.
-	bool priv 	= (RandomFloat() < 0.05);
+	bool priv 	= (pid%100 == 0) ? 1 : 0;//(RandomFloat() < 0.05);
 #endif
     assert(_cur_pid);
     int packet_destination = _traffic_pattern[cl]->dest(source);
@@ -898,6 +902,7 @@ void TrafficManager::_GeneratePacket( int source, int stype,
 	#ifdef PRIV_MODE
 		f->priv   = priv;
 	#endif
+		//DEBUG PRIV WATCH IS TRUE~
         f->watch  = watch | (gWatchOut && (_flits_to_watch.count(f->id) > 0));
         f->subnetwork = subnetwork;
         f->src    = source;
@@ -964,6 +969,12 @@ void TrafficManager::_Inject(){
 
     for ( int input = 0; input < _nodes; ++input ) {
         for ( int c = 0; c < _classes; ++c ) {
+#ifdef PRIV_MODE
+			if(blocked_vcs[input])
+			{
+					continue;
+			}
+#endif
             // Potentially generate packets for any (input,class)
             // that is currently empty
             if ( _partial_packets[input][c].empty() ) {
@@ -972,7 +983,7 @@ void TrafficManager::_Inject(){
                     int stype = _IssuePacket( input, c );
 	  
                     if ( (stype != 0)){ //&& !_dos_detected[input] ) { //generate a packet
-                        #ifdef TRACK_DOS
+#ifdef TRACK_DOS
                             
                         if (_dos_detected[input]) 
                         {
@@ -983,8 +994,8 @@ void TrafficManager::_Inject(){
                             goto skip;
 
                         }
-                        
-                        #endif
+                        _injected_flits_per_node[input] += _flits_per_packet;
+#endif
                        //if (!(_node_alert_sent[input] && _node_alert_timer[input] != 0) || _dos_detected[i] )
   
                 
@@ -992,7 +1003,7 @@ void TrafficManager::_Inject(){
                                              _include_queuing==1 ? 
                                              _qtime[input][c] : _time );
                             generated = true;
-						_injected_flits_per_node[input] += _flits_per_packet;
+						
                         
                     }
                     // only advance time if this is not a reply packet
@@ -1074,6 +1085,28 @@ void TrafficManager::_Step( )
   
     for ( int subnet = 0; subnet < _subnets; ++subnet ) {
         for ( int n = 0; n < _nodes; ++n ) {
+//#ifdef PRIV_MODE
+//	  		// THIS SECTION OF CODE IS INCOMPLETE!!!!!!
+//			Flit * const peek_f = _net[subnet]->PeekFlit( n );
+//			if(peek_f)
+//			{
+//				cout << "peekf" << endl;
+//	  			if(peek_f->priv && peek_f->head)
+//	  			{
+//	  					_block_vcs[n]	=	true;
+//						cout << "## Block VC vector ";
+//						for(int i = 0; i < n; i++)
+//						{
+//							cout << _block_vcs[i] << "\t" ;
+//						}
+//						cout << endl;
+//	  			}
+//			}
+//	  		//if(_block_vcs[n] && !f->priv)
+//	  		//{
+//	  		//		flits[subnet].erase();
+//	  		//}
+//#endif
             Flit * const f = _net[subnet]->ReadFlit( n );
             if ( f ) {
                 if(f->watch) {
@@ -1112,7 +1145,6 @@ void TrafficManager::_Step( )
         }
         _net[subnet]->ReadInputs( );
     }
-  
     if ( !_empty_network ) {
         _Inject();
     }
@@ -1172,12 +1204,16 @@ void TrafficManager::_Step( )
                     assert(os.size() == 1);
                     OutputSet::sSetElement const & se = *os.begin();
                     assert(se.output_port == -1);
-				#ifdef PRIV_MODE
-                    int vc_start = (f->priv) ? se.vc_start : se.vc_start + 1;
-				#endif
                     int vc_start = se.vc_start;
                     int vc_end = se.vc_end;
                     int vc_count = vc_end - vc_start + 1;
+				#ifdef PRIV_MODE
+					//cerr << "VC START: "<< vc_start <<"\n";
+					//cerr << "cf->PRIV_MODE: "<< cf->priv <<"\n";
+                	vc_start = (cf->priv) ? se.vc_start : se.vc_start + 1;
+					vc_end	 = (cf->priv) ? se.vc_start : se.vc_end;
+					vc_count = vc_end - vc_start + 1;
+				#endif
 					
                     if(_noq) {
                         assert(_lookahead_routing);
@@ -1260,6 +1296,13 @@ void TrafficManager::_Step( )
                         }
                     } else {
                         f = cf;
+					#ifdef PRIV_MODE
+						if(f->priv){ cout << "##PRIV FLIT ID : "<< f->id << endl;}
+						if(f->priv && (f->vc != 0))
+						{
+							cerr << "##Flit " << f->id << " vc : " << f->vc << "\n";
+						}
+					#endif
                     }
                 }
             }
@@ -1267,7 +1310,7 @@ void TrafficManager::_Step( )
             if(f) {
 
                 assert(f->subnetwork == subnet);
-
+				
                 int const c = f->cl;
 
                 if(f->head) {
@@ -1291,7 +1334,8 @@ void TrafficManager::_Step( )
                                        << "Already generated lookahead routing info for flit " << f->id
                                        << " (NOQ)." << endl;
                         }
-                    } else {
+                    }
+					else {
                         f->la_route_set.Clear();
                     }
 

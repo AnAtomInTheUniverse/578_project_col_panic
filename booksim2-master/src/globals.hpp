@@ -49,5 +49,6 @@ extern int gNodes;
 extern bool gTrace;
 
 extern std::ostream * gWatchOut;
+extern std::vector<bool> blocked_vcs;
 
 #endif

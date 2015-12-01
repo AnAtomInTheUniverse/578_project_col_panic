@@ -145,7 +145,7 @@ BookSimConfig::BookSimConfig( )
   //==== Allocators ========================================
 
   AddStrField( "vc_allocator", "islip" ); 
-  AddStrField( "sw_allocator", "islip" ); 
+  AddStrField( "sw_allocator", "select" ); 
   
   AddStrField( "arb_type", "round_robin" );
   
@@ -230,7 +230,7 @@ BookSimConfig::BookSimConfig( )
 
   _int_map["warmup_periods"] = 3; // number of samples periods to "warm-up" the simulation
 
-  _int_map["sample_period"] = 1000; // how long between measurements
+  _int_map["sample_period"] = 10000; // how long between measurements
   _int_map["max_samples"]   = 10;   // maximum number of sample periods in a simulation
 
   // whether or not to measure statistics for a given traffic class
@@ -276,13 +276,13 @@ BookSimConfig::BookSimConfig( )
 
   _int_map["viewer_trace"] = 0;
 
-  AddStrField("watch_file", "");
+  AddStrField("watch_file", "watch.list");
   
   AddStrField("watch_flits", "");
   AddStrField("watch_packets", "");
   AddStrField("watch_transactions", "");
 
-  AddStrField("watch_out", "");
+  AddStrField("watch_out", "watch.out");
 
   AddStrField("stats_out", "");
 

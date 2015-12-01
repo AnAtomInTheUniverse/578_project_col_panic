@@ -182,6 +182,11 @@ void VC::UpdatePriority()
 		  << "." << endl;
     _pri = f->pri;
   }
+  else
+  {
+    Flit * f = _buffer.back();
+    _pri = (f->vc == 0) ? 1 : 0;
+  }
 }
 
 

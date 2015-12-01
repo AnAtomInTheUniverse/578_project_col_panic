@@ -218,6 +218,7 @@ Flit *Network::ReadFlit( int dest )
   return _eject[dest]->Receive();
 }
 
+
 void Network::WriteCredit( Credit *c, int dest )
 {
   assert( ( dest >= 0 ) && ( dest < _nodes ) );

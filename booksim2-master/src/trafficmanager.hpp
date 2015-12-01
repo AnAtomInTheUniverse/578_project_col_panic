@@ -210,9 +210,8 @@ protected:
  vector<bool> _node_alert_sent;
  vector<int> _node_alert_timer;
  int _cycle_count;
-
-
 #endif
+
   vector<int> _slowest_packet;
   vector<int> _slowest_flit;
 

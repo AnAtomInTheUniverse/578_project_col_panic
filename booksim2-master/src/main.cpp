@@ -41,8 +41,7 @@
 #include <iostream>
 #include <fstream>
 
-
-
+#include <vector>
 #include <sstream>
 #include "booksim.hpp"
 #include "routefunc.hpp"
@@ -89,8 +88,7 @@ int gNodes;
 bool gTrace;
 
 ostream * gWatchOut;
-
-
+vector<bool> blocked_vcs;
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -167,6 +165,10 @@ int main( int argc, char **argv )
    */
   InitializeRoutingMap( config );
 
+#ifdef PRIV_MODE
+  int nodes = (config.GetInt("k"))*(config.GetInt("k"));
+  blocked_vcs.resize(nodes, false);
+#endif
   gPrintActivity = (config.GetInt("print_activity") > 0);
   gTrace = (config.GetInt("viewer_trace") > 0);
   

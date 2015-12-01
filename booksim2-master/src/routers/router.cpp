@@ -54,6 +54,9 @@ int const Router::STALL_BUFFER_CONFLICT = -3;
 int const Router::STALL_BUFFER_FULL = -4;
 int const Router::STALL_BUFFER_RESERVED = -5;
 int const Router::STALL_CROSSBAR_CONFLICT = -6;
+#ifdef PRIV_MODE
+int const Router::STALL_PRIV_MODE = -7;
+#endif
 
 Router::Router( const Configuration& config,
 		Module *parent, const string & name, int id,
@@ -102,11 +105,11 @@ void Router::AddOutputChannel( FlitChannel *channel, CreditChannel *backchannel 
   channel->SetSource( this, _output_channels.size() - 1 ) ;
 }
 
-void Router::Evaluate( )
+void Router::Evaluate()
 {
   _partial_internal_cycles += _internal_speedup;
   while( _partial_internal_cycles >= 1.0 ) {
-    _InternalStep( );
+    _InternalStep();
     _partial_internal_cycles -= 1.0;
   }
 }

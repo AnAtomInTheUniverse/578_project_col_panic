@@ -34,11 +34,11 @@ n = 2;
 // Routing
 routing_function = dim_order ;
 // Flow control
-num_vcs = 2;
+num_vcs = 3;
 // Traffic
 classes = 1;
 traffic = uniform;
-injection_rate = 0.02;
+injection_rate = 0.2;
 packet_size = 1;
 
 latency_thres = 50000.0;

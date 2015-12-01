@@ -65,7 +65,9 @@ public:
   virtual void ReadInputs();
   virtual void Evaluate() {}
   virtual void WriteOutputs();
-
+//#ifdef PRIV_MODE
+//  virtual T* Peek();
+//#endif
 protected:
   int _delay;
   T * _input;
@@ -96,6 +98,15 @@ template<typename T>
 T * Channel<T>::Receive() {
   return _output;
 }
+
+//#ifdef PRIV_MODE
+//template<typename T>
+//T *Channel<T>::Peek()
+//{
+//	return _input;
+//	
+//}
+//#endif
 
 template<typename T>
 void Channel<T>::ReadInputs() {

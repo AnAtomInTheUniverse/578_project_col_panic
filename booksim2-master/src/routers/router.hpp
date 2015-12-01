@@ -49,7 +49,9 @@ protected:
   static int const STALL_BUFFER_FULL;
   static int const STALL_BUFFER_RESERVED;
   static int const STALL_CROSSBAR_CONFLICT;
-
+#ifdef PRIV_MODE
+  static int const STALL_PRIV_MODE;
+#endif
   int _id;
   
   int _inputs;
